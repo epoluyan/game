@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-expressions, no-alert */
 import { calcHealthLevel, calcTileType } from './utils';
 
 export default class GamePlay {
@@ -13,7 +12,6 @@ export default class GamePlay {
     this.newGameListeners = [];
     this.saveGameListeners = [];
     this.loadGameListeners = [];
-    this.escListener = null;
   }
 
   bindToDOM(container) {
@@ -61,7 +59,6 @@ export default class GamePlay {
       cellEl.addEventListener('click', (event) => this.onCellClick(event));
       this.boardEl.appendChild(cellEl);
     }
-    document.addEventListener('keydown', (event) => this.onEsc(event));
 
     this.cells = Array.from(this.boardEl.children);
   }
@@ -92,15 +89,6 @@ export default class GamePlay {
       charEl.appendChild(healthEl);
       cellEl.appendChild(charEl);
     }
-  }
-
-  /**
-   * Add listener to Esc pressing
-   *
-   * @param callback
-   */
-  addEscListener(callback) {
-    this.escListener = callback;
   }
 
   /**
@@ -157,13 +145,6 @@ export default class GamePlay {
     this.loadGameListeners.push(callback);
   }
 
-  onEsc(event) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      this.escListener();
-    }
-  }
-
   onCellEnter(event) {
     event.preventDefault();
     const index = this.cells.indexOf(event.currentTarget);
@@ -197,10 +178,12 @@ export default class GamePlay {
   }
 
   static showError(message) {
+    // eslint-disable-next-line no-alert
     alert(message);
   }
 
   static showMessage(message) {
+    // eslint-disable-next-line no-alert
     alert(message);
   }
 
@@ -213,11 +196,6 @@ export default class GamePlay {
     const cell = this.cells[index];
     cell.classList.remove(...Array.from(cell.classList)
       .filter((o) => o.startsWith('selected')));
-  }
-
-  deselectAll() {
-    const { cells } = this;
-    cells.forEach((cell) => this.deselectCell(cells.indexOf(cell)));
   }
 
   showCellTooltip(message, index) {

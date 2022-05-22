@@ -11,7 +11,7 @@ export default class GameStateService {
     try {
       return JSON.parse(this.storage.getItem('state'));
     } catch (e) {
-      throw new Error('Invalid state');
+      throw new Error('Error state game');
     }
   }
 }

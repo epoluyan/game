@@ -1,32 +1,44 @@
-/**
- * Generates random characters
- *
- * @param allowedTypes iterable of classes
- * @param maxLevel max character level
- * @returns Character type children (ex. Magician, Bowman, etc)
- */
-export function* characterGenerator(allowedTypes, maxLevel) {
-  while (true) {
-    const i = Math.floor(Math.random() * allowedTypes.length);
-    const level = Math.ceil(Math.random() * maxLevel);
+import Team from './Team';
+import PositionedCharacter from './PositionedCharacter';
 
-    yield { character: new allowedTypes[i](level), level };
+import { playerTypes, playerPositions, computerPositions } from './utils';
+
+export function* characterGenerator(allowedTypes, maxLevel) {
+  const index = Math.floor(Math.random() * (allowedTypes.length));
+  const indexLevel = Math.floor(Math.random() * (maxLevel)) + 1;
+
+  const character = new allowedTypes[index](1);
+
+  for (let i = 1; i < indexLevel; i += 1) {
+    character.levelUp();
   }
+
+  yield character;
 }
 
-/* eslint no-plusplus: ["error", { "allowForLoopAfterthoughts": true }] */
+export function generateTeam(allowedTypes, maxLevel, characterCount) {
+  const team = new Team();
 
-export function generateTeam(allowedTypes, maxLevel, characterCount, moreFury = false) {
-  const newHero = characterGenerator(allowedTypes, maxLevel);
-  const team = [];
-
-  for (let i = 0; i < characterCount; i++) {
-    const newbie = newHero.next().value;
-    if (moreFury && newbie.level !== 1) {
-      newbie.character.attack += 5 * (newbie.level - 1);
-      newbie.character.defence += 5 * (newbie.level - 1);
+  function generatePosition(allowedPositions) {
+    // eslint-disable-next-line max-len
+    let coordinate = allowedPositions[Math.floor(Math.random() * (allowedPositions.length))];
+    // eslint-disable-next-line no-loop-func
+    while (team.members.filter((item) => item.position === coordinate).length > 0) {
+      coordinate = allowedPositions[Math.floor(Math.random() * (allowedPositions.length))];
     }
-    team.push(newbie.character);
+    return coordinate;
   }
+
+  for (let i = 0; i < characterCount; i += 1) {
+    const character = characterGenerator(allowedTypes, maxLevel).next().value;
+    let position = generatePosition(computerPositions());
+
+    if (allowedTypes.filter((item, index) => item === playerTypes()[index]).length > 0) {
+      position = generatePosition(playerPositions());
+    }
+
+    team.add(new PositionedCharacter(character, position));
+  }
+
   return team;
 }

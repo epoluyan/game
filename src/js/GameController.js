@@ -1,431 +1,473 @@
 import themes from './themes';
-import PositionedCharacter from './PositionedCharacter';
-import tooltip from './tooltip';
-import { generateTeam } from './generators';
-import Bowman from './Bowman';
-import Swordsman from './Swordsman';
-import Magician from './Magician';
-import Vampire from './Vampire';
-import Daemon from './Daemon';
-import Undead from './Undead';
-import GamePlay from './GamePlay';
 import cursors from './cursors';
+
+import GamePlay from './GamePlay';
+import GameState from './GameState';
+
+import { generateTeam } from './generators';
+
+import {
+  playerTypes, computerTypes,
+  playerTypesName, computerTypesName,
+  playerPositions, computerPositions,
+} from './utils';
 
 export default class GameController {
   constructor(gamePlay, stateService) {
     this.gamePlay = gamePlay;
+    this.gameState = new GameState();
     this.stateService = stateService;
-    this.sides = {
-      light: {
-        name: 'light', first: 0, second: 1, characters: [Bowman, Swordsman, Magician],
-      },
-      dark: {
-        name: 'dark', first: 6, second: 7, characters: [Vampire, Daemon, Undead],
-      },
-    };
-    this.positionsToDraw = [];
-    this.selected = undefined;
-    this.movements = [];
-    this.attacks = [];
-    this.statuses = {
-      freespace: 'free space',
-      enemy: 'enemy',
-      allied: 'allied',
-      notallowed: 'notallowed',
-    };
-    this.currentStatus = undefined;
-    this.level = 1;
-    this.score = 0;
   }
 
-  init() {
-    this.theme = themes.prairie;
-    this.gamePlay.drawUi(this.theme);
+  reset() {
+    if (this.gameState.selectedPosition !== null) {
+      this.gamePlay.deselectCell(this.gameState.selectedPosition);
+    }
+
+    this.gameState.characters = [];
+    this.gameState.level = 1;
+    this.gameState.turnPlayer = true;
+    this.gameState.selectedPosition = null;
+    this.gameState.selectedCharacter = null;
+    this.gameState.selectedCell = null;
+    this.gameState.score = 0;
+
+    this.gamePlay.cellClickListeners = [];
+    this.gamePlay.cellEnterListeners = [];
+    this.gamePlay.cellLeaveListeners = [];
+  }
+
+  newGame() {
+    this.reset();
+
+    const teamPlayer = generateTeam(playerTypes(), this.gameState.level, 2);
+    const teamComputer = generateTeam(computerTypes(), this.gameState.level, 2);
+
+    for (let i = 0; i < teamPlayer.members.length; i += 1) {
+      this.gameState.characters.push(teamPlayer.members[i]);
+      this.gameState.characters.push(teamComputer.members[i]);
+    }
+
+    this.gamePlay.drawUi(themes[this.gameState.level]);
+    this.gamePlay.redrawPositions(this.gameState.characters);
+
     this.gamePlay.addCellEnterListener(this.onCellEnter.bind(this));
-    this.gamePlay.addCellClickListener(this.onCellClick.bind(this));
     this.gamePlay.addCellLeaveListener(this.onCellLeave.bind(this));
-    this.gamePlay.addNewGameListener(this.newGame.bind(this, this.level, this.theme));
-    this.gamePlay.addEscListener(this.onEsc.bind(this));
-    this.gamePlay.addLoadGameListener(this.loadGame.bind(this));
-    this.gamePlay.addSaveGameListener(this.saveGame.bind(this));
-  }
-
-  newGame(level = 1, theme = themes.prairie) {
-    this.level = level;
-    this.gamePlay.drawUi(theme);
-    this.gamePlay.deselectAll();
-    this.selected = undefined;
-    const light = this.sidePositions(this.sides.light);
-    const dark = this.sidePositions(this.sides.dark);
-
-    function choosePoint(side) {
-      const index = Math.floor(Math.random() * side.length);
-      const point = side[index];
-      side.splice(index, 1);
-      return point;
-    }
-
-    if (level === 1) {
-      this.positionsToDraw = [];
-    }
-
-    if (!this.positionsToDraw.length) {
-      const darkTeam = generateTeam(this.sides.dark.characters, level, 2);
-      const lightTeam = generateTeam(this.sides.light.characters, level, 2);
-      this.positionsToDraw = [
-        lightTeam.map((item) => new PositionedCharacter(
-          item, this.sides.light.name, choosePoint(light),
-        )),
-        darkTeam.map((item) => new PositionedCharacter(
-          item, this.sides.dark.name, choosePoint(dark),
-        )),
-      ].flat();
-    } else {
-      this.positionsToDraw.forEach((hero) => { hero.position = choosePoint(light); });
-      const lightFiltered = this.sidePositions(this.sides.light).filter(
-        (cell) => !this.positionsToDraw.find((hero) => hero.position === cell),
-      );
-      const darkTeam = generateTeam(this.sides.dark.characters, level, level * 2, true);
-      const lightTeam = generateTeam(this.sides.light.characters, level, 2);
-      this.positionsToDraw.push(lightTeam.map(
-        (item) => new PositionedCharacter(item, this.sides.light.name, choosePoint(lightFiltered)),
-      ));
-      this.positionsToDraw.push(darkTeam.map(
-        (item) => new PositionedCharacter(item, this.sides.dark.name, choosePoint(dark)),
-      ));
-      this.positionsToDraw = this.positionsToDraw.flat();
-      GamePlay.showMessage('The enemies are furious! Be careful!');
-    }
-    this.gamePlay.redrawPositions(this.positionsToDraw);
-  }
-
-  loadGame() {
-    this.gamePlay.deselectAll();
-    this.selected = undefined;
-    const loaded = this.stateService.load();
-    if (!loaded) {
-      GamePlay.showError('No game to load!');
-    } else {
-      this.level = loaded.level;
-      this.positionsToDraw = loaded.positions;
-      this.theme = loaded.theme;
-      this.score = loaded.level;
-      this.gamePlay.drawUi(loaded.theme);
-      this.gamePlay.redrawPositions(this.positionsToDraw);
-      GamePlay.showMessage('Loaded!');
-    }
+    this.gamePlay.addCellClickListener(this.onCellClick.bind(this));
   }
 
   saveGame() {
-    if (!this.positionsToDraw.length && !this.score) {
-      GamePlay.showError('No game to save!');
-    } else {
-      const state = {
-        level: this.level,
-        positions: this.positionsToDraw,
-        theme: this.theme,
-        score: this.score,
-      };
-      this.stateService.save(state);
-      GamePlay.showMessage('Saved!');
-    }
+    this.stateService.save(this.gameState);
   }
 
-  positions() {
-    const positions = [];
-    for (let i = 0; i < this.gamePlay.boardSize ** 2; i += 1) {
-      positions.push(i);
-    }
-    return { array: positions, lineLength: this.gamePlay.boardSize, length: positions.length };
+  loadGame() {
+    const state = this.stateService.load();
+    GameState.from(this.gameState, state);
+    this.gamePlay.drawUi(themes[this.gameState.level]);
+    this.gamePlay.redrawPositions(this.gameState.characters);
+    if (!this.gameState.turnPlayer) setTimeout(() => this.turnComputer(), 2000);
   }
 
-  sidePositions(side) {
-    const field = this.positions();
-    return field.array.filter((item) => (item % field.lineLength === side.first)
-      || (item % field.lineLength === side.second)).map((item) => item);
+  gameOver(message) {
+    GamePlay.showMessage(message);
+    this.gamePlay.cellClickListeners = [];
+    this.gamePlay.cellEnterListeners = [];
+    this.gamePlay.cellLeaveListeners = [];
   }
 
-  onEsc() {
-    if (this.selected) {
-      this.gamePlay.deselectAll();
-    }
-    this.selected = undefined;
-    this.movements = [];
-    this.attacks = [];
-    this.currentStatus = undefined;
-  }
+  init() {
+    this.gamePlay.addNewGameListener(this.newGame.bind(this));
+    this.gamePlay.addSaveGameListener(this.saveGame.bind(this));
+    this.gamePlay.addLoadGameListener(this.loadGame.bind(this));
 
-  levelUp() {
-    this.level += 1;
-    this.positionsToDraw.forEach((hero) => {
-      hero.character.level = this.level;
-      hero.character.attack = Math.ceil(Math.max(hero.character.attack, hero.character.attack * (1.8 - hero.character.health / 100)));
-      hero.character.health = (hero.character.health + 80 > 100) ? 100 : Math.ceil(hero.character.health + 80);
-    });
-    switch (this.level) {
-      case 2:
-        this.gamePlay.drawUi(themes.desert);
-        this.theme = themes.desert;
-        break;
-      case 3:
-        this.gamePlay.drawUi(themes.arctic);
-        this.theme = themes.arctic;
-        break;
-      case 4:
-        this.gamePlay.drawUi(themes.mountain);
-        this.theme = themes.mountain;
-        break;
-      default:
-        this.gamePlay.drawUi(themes.prairie);
-        this.theme = themes.prairie;
-        break;
-    }
-    return this.level;
-  }
-
-  moveRevenger(revenger, attacker, darks) {
-    const movements = this.resolveArea(revenger, revenger.character.distance)
-      .filter((item) => this.positionsToDraw.findIndex((hero) => hero.position === item) === -1);
-    const coordinates = (hero) => ({
-      x: hero.position % this.gamePlay.boardSize,
-      y: Math.floor(hero.position / this.gamePlay.boardSize),
-    });
-    const fighters = {
-      revenger: coordinates(revenger),
-      attacker: coordinates(attacker),
-    };
-
-    const probablePlaces = () => {
-      if (fighters.attacker.x <= fighters.revenger.x) {
-        if (fighters.attacker.y <= fighters.revenger.y) {
-          return movements.filter(
-            (item) => ((item % this.gamePlay.boardSize) >= fighters.attacker.x)
-              && ((item % this.gamePlay.boardSize) <= fighters.revenger.x)
-              && (Math.floor(item / this.gamePlay.boardSize) <= fighters.revenger.y)
-              && (Math.floor(item / this.gamePlay.boardSize) >= fighters.attacker.y),
-          );
-        }
-        return movements.filter(
-          (item) => ((item % this.gamePlay.boardSize) >= fighters.attacker.x)
-            && ((item % this.gamePlay.boardSize) <= fighters.revenger.x)
-            && (Math.floor(item / this.gamePlay.boardSize) > fighters.revenger.y)
-            && (Math.floor(item / this.gamePlay.boardSize) <= fighters.attacker.y),
-        );
-      }
-      if (fighters.attacker.y <= fighters.revenger.y) {
-        return movements.filter(
-          (item) => ((item % this.gamePlay.boardSize) <= fighters.attacker.x)
-            && ((item % this.gamePlay.boardSize) > fighters.revenger.x)
-            && (Math.floor(item / this.gamePlay.boardSize) <= fighters.revenger.y)
-            && (Math.floor(item / this.gamePlay.boardSize) >= fighters.attacker.y),
-        );
-      }
-      return movements.filter(
-        (item) => ((item % this.gamePlay.boardSize) <= fighters.attacker.x)
-          && ((item % this.gamePlay.boardSize) > fighters.revenger.x)
-          && (Math.floor(item / this.gamePlay.boardSize) > fighters.revenger.y)
-          && (Math.floor(item / this.gamePlay.boardSize) <= fighters.attacker.y),
-      );
-    };
-
-    const probables = probablePlaces();
-    if (!probables.length) {
-      if (!movements.length) {
-        const otherDarks = [...darks];
-        otherDarks.splice(darks.indexOf(revenger), 1);
-        revenger = otherDarks[Math.floor(Math.random() * otherDarks.length)];
-      }
-      const randomMovements = this.resolveArea(revenger, revenger.character.distance)
-        .filter((item) => this.positionsToDraw.findIndex((hero) => hero.position === item) === -1);
-      return randomMovements[Math.floor(Math.random() * randomMovements.length)];
-    }
-    return probables[Math.floor(Math.random() * probablePlaces.length)];
-  }
-
-  moveDarksAndAttack() {
-    this.gamePlay.deselectAll();
-    const darks = this.positionsToDraw.filter((hero) => hero.side === this.sides.dark.name);
-    const revenger = darks.find(
-      (item) => item.character.attack === Math.max.apply(
-        null, darks.map((hero) => hero.character.attack),
-      ),
-    );
-    return new Promise((resolve, reject) => {
-      const damageToAttacker = Math.max(revenger.character.attack
-        - this.selected.character.defence, revenger.character.attack * 0.1);
-      if (this.resolveArea(revenger, revenger.character.distanceAttack)
-        .find((item) => item === this.selected.position)) {
-        this.selected.character.health -= damageToAttacker;
-        resolve(damageToAttacker);
-      } else {
-        reject({ revenger, darks });
-      }
-    });
+    this.gamePlay.drawUi(themes[this.gameState.level]);
   }
 
   onCellClick(index) {
-    function wrapperForActionsAfterEnemyLogic() {
-      if (this.selected?.character.health <= 0) {
-        this.positionsToDraw.splice(this.positionsToDraw.indexOf(this.selected), 1);
-      }
-      this.gamePlay.redrawPositions(this.positionsToDraw);
-      this.selected = undefined;
-      if (!this.positionsToDraw.find((item) => item.side === this.sides.light.name)) {
-        this.gamePlay.drawUi(themes.prairie);
-        GamePlay.showMessage('Game over!');
-      }
-    }
+    const indexCharacter = this.gameState.characters.findIndex((item) => item.position === index);
 
-    const point = this.positionsToDraw.find((item) => item.position === index);
-    if (this.selected === undefined) {
-      if (!point) {
-      } else if (['bowman', 'swordsman', 'magician'].includes(point.character.type)) {
-        this.selected = point;
-        this.gamePlay.selectCell(index);
-      } else {
-        GamePlay.showError('This character is not playable!');
-      }
-    } else if (this.currentStatus === this.statuses.freespace) {
-      [this.selected.position, index].forEach((cell) => this.gamePlay.deselectCell(cell));
-      this.selected.position = index;
-      this.gamePlay.redrawPositions(this.positionsToDraw);
-      this.moveDarksAndAttack()
-        .then(
-          (damageToAttacker) => this.gamePlay.showDamage(this.selected.position, damageToAttacker),
-          (reject) => {
-            reject.revenger.position = this.moveRevenger(reject.revenger, this.selected, reject.darks);
-          },
-        )
-        .then(wrapperForActionsAfterEnemyLogic.bind(this));
-    } else if ((this.currentStatus === this.statuses.allied) && (this.selected !== point)) {
-      this.gamePlay.deselectCell(this.selected.position);
-      this.selected = point;
-      this.gamePlay.selectCell(index);
-    } else if (this.currentStatus === this.statuses.enemy) {
-      const victim = this.positionsToDraw.find((hero) => hero.position === index);
-      const damageToVictim = Math.max(this.selected.character.attack
-        - victim.character.defence, this.selected.character.attack * 0.1);
-      victim.character.health -= damageToVictim;
-      if (victim.character.health <= 0) {
-        this.positionsToDraw.splice(this.positionsToDraw.indexOf(victim), 1);
-        this.gamePlay.redrawPositions(this.positionsToDraw);
-        this.gamePlay.deselectAll();
-        if (!this.positionsToDraw.find((item) => item.side === this.sides.dark.name)) {
-          this.selected = undefined;
-          this.score = this.positionsToDraw.reduce((accumulator, hero) => accumulator + hero.character.health, this.score);
-          if (this.level === 4) {
-            this.gamePlay.drawUi(themes.prairie);
-            GamePlay.showMessage(`Victory! Your score is ${this.score}.`);
-          } else {
-            GamePlay.showMessage(`Level up! Your score is ${this.score}.`);
-            this.newGame(this.levelUp(), this.theme);
+    if (this.gameState.turnPlayer) {
+      if (indexCharacter > -1) {
+        if (playerTypesName().includes(this.gameState.characters[indexCharacter].character.type)) {
+          if (this.gameState.selectedPosition !== null) {
+            this.gamePlay.deselectCell(this.gameState.selectedPosition);
           }
-        } else {
-          this.moveDarksAndAttack()
-            .then(
-              (damageToAttacker) => this.gamePlay
-                .showDamage(this.selected.position, damageToAttacker),
-              (reject) => {
-                reject.revenger.position = this.moveRevenger(reject.revenger, this.selected, reject.darks);
-              },
-            )
-            .then(wrapperForActionsAfterEnemyLogic.bind(this));
-        }
-      } else {
-        this.gamePlay.showDamage(index, damageToVictim)
-          .then(() => this.gamePlay.redrawPositions(this.positionsToDraw))
-          .then(() => this.moveDarksAndAttack())
-          .then(
-            (damageToAttacker) => this.gamePlay
-              .showDamage(this.selected.position, damageToAttacker),
-            (reject) => {
-              reject.revenger.position = this.moveRevenger(reject.revenger, this.selected, reject.darks);
-            },
-          )
-          .then(wrapperForActionsAfterEnemyLogic.bind(this));
-      }
-    } else {
-      GamePlay.showError('This action is not allowed!');
-      this.gamePlay.deselectCell(this.selected.position);
-      this.selected = undefined;
-    }
-  }
-
-  resolveArea(point, action) {
-    const area = [];
-    for (
-      let i = point.position - this.gamePlay.boardSize * action;
-      (i <= point.position + this.gamePlay.boardSize * action);
-      i += this.gamePlay.boardSize
-    ) {
-      if ((i >= 0) && (i < this.gamePlay.boardSize ** 2)) {
-        for (
-          let j = i - action;
-          j <= i + action;
-          j += 1
+          this.gamePlay.selectCell(index);
+          this.gameState.selectedPosition = index;
+          this.gameState.selectedCharacter = this.gameState.characters[indexCharacter].character;
+        } else if (
+          computerTypesName().includes(this.gameState.characters[indexCharacter].character.type)
+          && this.gameState.selectedPosition === null
         ) {
+          GamePlay.showError('You cannot play this character');
+        }
+
+        if (this.gameState.selectedCharacter !== null) {
           if (
-            (j >= i - (i % this.gamePlay.boardSize))
-            && (j < i + (this.gamePlay.boardSize - (i % this.gamePlay.boardSize)))
+            computerTypesName().includes(this.gameState.characters[indexCharacter].character.type)
+            && this.availableCells(index).possible
           ) {
-            area.push(j);
+            this.attack(index);
+            setTimeout(() => this.turnComputer(), 2000);
           }
         }
       }
+
+      if (indexCharacter === -1 && this.gameState.selectedCharacter !== null) {
+        if (this.availableCells(index).possible) {
+          this.motion(index);
+          setTimeout(() => this.turnComputer(), 2000);
+        }
+      }
+
+      if (this.gamePlay.boardEl.style.cursor === 'not-allowed') GamePlay.showError('Action cannot be performed');
     }
-    area.splice(area.indexOf(point.position), 1);
-    return area;
   }
 
   onCellEnter(index) {
-    this.positionsToDraw.forEach((item) => {
-      if (item.position === index) {
-        this.gamePlay.showCellTooltip(tooltip(item.character), index);
+    const indexCharacter = this.gameState.characters.findIndex((item) => item.position === index);
+
+    if (indexCharacter > -1) {
+      this.gamePlay.showCellTooltip(`🎖 ${this.gameState.characters[indexCharacter].character.level} ⚔ ${this.gameState.characters[indexCharacter].character.attack} 🛡 ${this.gameState.characters[indexCharacter].character.defence} ❤ ${this.gameState.characters[indexCharacter].character.health}`, index);
+
+      if (
+        playerTypesName().includes(this.gameState.characters[indexCharacter].character.type)
+        && index !== this.gameState.selectedPosition
+      ) {
+        this.gamePlay.setCursor(cursors.pointer);
       }
-    });
 
-    if (this.selected) {
-      const actions = {
-        distance: this.selected.character.distance,
-        distanceAttack: this.selected.character.distanceAttack,
-      };
-      this.movements = this.resolveArea(this.selected, actions.distance)
-        .filter((item) => this.positionsToDraw.findIndex((hero) => hero.position === item) === -1);
-      this.attacks = this.resolveArea(this.selected, actions.distanceAttack)
-        .filter((item) => this.positionsToDraw.findIndex((hero) => (hero.position === item)
-          && (hero.side === this.sides.light.name)) === -1);
+      if (
+        computerTypesName().includes(this.gameState.characters[indexCharacter].character.type)
+        && this.gameState.selectedCharacter !== null
+      ) {
+        if (this.availableCells(index).possible) {
+          this.gamePlay.setCursor(cursors.crosshair);
+          this.gamePlay.selectCell(index, 'red');
+          this.gameState.selectedCell = index;
+        } else {
+          this.gamePlay.setCursor(cursors.notallowed);
+        }
+      }
+    }
 
-      if (this.movements.includes(index)) {
+    if (indexCharacter === -1 && this.gameState.selectedCharacter !== null) {
+      if (this.availableCells(index).possible) {
+        this.gamePlay.setCursor(cursors.pointer);
         this.gamePlay.selectCell(index, 'green');
-        this.gamePlay.setCursor(cursors.pointer);
-        this.currentStatus = this.statuses.freespace;
-      } else if (this.attacks.includes(index)
-        && this.positionsToDraw.filter((item) => item.side === this.sides.dark.name)
-          .find((item) => item.position === index)) {
-        this.gamePlay.selectCell(index, 'red');
-        this.gamePlay.setCursor(cursors.crosshair);
-        this.currentStatus = this.statuses.enemy;
-      } else if (this.positionsToDraw.filter((item) => item.side === this.sides.light.name)
-        .find((item) => (item.position === index) && (item.position !== this.selected.position))) {
-        this.gamePlay.setCursor(cursors.pointer);
-        this.currentStatus = this.statuses.allied;
+        this.gameState.selectedCell = index;
       } else {
         this.gamePlay.setCursor(cursors.notallowed);
-        this.currentStatus = this.statuses.notallowed;
       }
-    } else if (this.positionsToDraw.filter((hero) => hero.side === this.sides.light.name)
-      .find((item) => item.position === index)) {
-      this.gamePlay.setCursor(cursors.pointer);
-    } else {
-      this.gamePlay.setCursor(cursors.auto);
     }
   }
 
   onCellLeave(index) {
-    this.gamePlay.hideCellTooltip(index);
-    if (index !== this.selected?.position) {
-      this.gamePlay.deselectCell(index);
-    }
+    const indexCharacter = this.gameState.characters.findIndex((item) => item.position === index);
+
     this.gamePlay.setCursor(cursors.auto);
+
+    if (this.gameState.selectedCell !== null) {
+      this.gamePlay.deselectCell(this.gameState.selectedCell);
+    }
+    if (indexCharacter > -1) this.gamePlay.hideCellTooltip(index);
+  }
+
+  availableCells(index) {
+    let x = (this.gameState.selectedPosition + 1) % this.gamePlay.boardSize;
+    if (x === 0) x = 8;
+    const y = Math.ceil((this.gameState.selectedPosition + 1) / this.gamePlay.boardSize);
+    const possibleVersion = [];
+    let step = 2;
+
+    function findCoordinate(row, column, boardSize) {
+      return ((column - 1) * boardSize + row) - 1;
+    }
+
+    if (this.gameState.selectedCharacter.type === 'swordsman' || this.gameState.selectedCharacter.type === 'undead') {
+      if (this.gameState.characters.findIndex((item) => item.position === index) > -1) {
+        step = 1;
+      } else {
+        step = 4;
+      }
+    }
+
+    if (this.gameState.selectedCharacter.type === 'magician' || this.gameState.selectedCharacter.type === 'daemon') {
+      if (this.gameState.characters.findIndex((item) => item.position === index) > -1) {
+        step = 4;
+      } else {
+        step = 1;
+      }
+    }
+
+    if (this.gameState.characters.findIndex((item) => item.position === index) === -1) {
+      for (let i = 1; i <= step; i += 1) {
+        if (x - i > 0) {
+          possibleVersion.push(findCoordinate(x - i, y, this.gamePlay.boardSize));
+        }
+        if (x + i <= this.gamePlay.boardSize) {
+          possibleVersion.push(findCoordinate(x + i, y, this.gamePlay.boardSize));
+        }
+        if (y - i > 0) {
+          possibleVersion.push(findCoordinate(x, y - i, this.gamePlay.boardSize));
+        }
+        if (y + i <= this.gamePlay.boardSize) {
+          possibleVersion.push(findCoordinate(x, y + i, this.gamePlay.boardSize));
+        }
+        if (x - i > 0 && y - i > 0) {
+          possibleVersion.push(findCoordinate(x - i, y - i, this.gamePlay.boardSize));
+        }
+        if (x + i <= this.gamePlay.boardSize && y - i > 0) {
+          possibleVersion.push(findCoordinate(x + i, y - i, this.gamePlay.boardSize));
+        }
+        if (x + i <= this.gamePlay.boardSize && y + i <= this.gamePlay.boardSize) {
+          possibleVersion.push(findCoordinate(x + i, y + i, this.gamePlay.boardSize));
+        }
+        if (x - i > 0 && y + i <= this.gamePlay.boardSize) {
+          possibleVersion.push(findCoordinate(x - i, y + i, this.gamePlay.boardSize));
+        }
+      }
+    } else {
+      let top = 0;
+      let right = 0;
+      let left = 0;
+      let bottom = 0;
+
+      for (let i = 1; i <= step; i += 1) {
+        if (x - i > 0) left = i;
+        if (x + i <= this.gamePlay.boardSize) right = i;
+        if (y - i > 0) top = i;
+        if (y + i <= this.gamePlay.boardSize) bottom = i;
+      }
+
+      for (let j = y - top; j <= y + bottom; j += 1) {
+        for (let i = x - left; i <= x + right; i += 1) {
+          possibleVersion.push(findCoordinate(i, j, this.gamePlay.boardSize));
+        }
+      }
+    }
+
+    if (possibleVersion.includes(index)) {
+      return { array: possibleVersion, possible: true };
+    }
+
+    return { array: possibleVersion, possible: false };
+  }
+
+  async attack(index) {
+    const indexEnemy = this.gameState.characters.findIndex((item) => item.position === index);
+    const damage = Math.round(Math.max(
+      // eslint-disable-next-line max-len
+      this.gameState.selectedCharacter.attack - this.gameState.characters[indexEnemy].character.defence,
+      this.gameState.selectedCharacter.attack * 0.1,
+    ));
+    this.gameState.characters[indexEnemy].character.health -= damage;
+    await this.gamePlay.showDamage(index, damage);
+
+    if (this.gameState.characters[indexEnemy].character.health <= 0) {
+      this.gameState.characters.splice(indexEnemy, 1);
+    }
+
+    if (this.gameState.turnPlayer) {
+      // eslint-disable-next-line max-len
+      const teamComputer = this.gameState.characters.filter((item) => computerTypesName().includes(item.character.type));
+      if (teamComputer.length === 0) {
+        this.levelUp();
+        this.performAction();
+        this.gameState.turnPlayer = true;
+        return null;
+      }
+    }
+
+    if (!this.gameState.turnPlayer) {
+      // eslint-disable-next-line max-len
+      const teamPlayer = this.gameState.characters.filter((item) => playerTypesName().includes(item.character.type));
+      if (teamPlayer.length === 0) {
+        this.checkRecord();
+        this.gameOver(`Game over: ${this.gameState.score}. Best score: ${this.gameState.record}`);
+        this.performAction();
+        this.gameState.turnPlayer = true;
+        return null;
+      }
+    }
+
+    this.performAction();
+    return null;
+  }
+
+  motion(index) {
+    // eslint-disable-next-line max-len
+    const indexSelected = this.gameState.characters.findIndex((item) => item.position === this.gameState.selectedPosition);
+    this.gameState.characters[indexSelected].position = index;
+
+    this.performAction();
+  }
+
+  performAction() {
+    this.gamePlay.deselectCell(this.gameState.selectedPosition);
+    this.gamePlay.deselectCell(this.gameState.selectedCell);
+
+    this.gamePlay.redrawPositions(this.gameState.characters);
+
+    this.gameState.selectedPosition = null;
+    this.gameState.selectedCharacter = null;
+    this.gameState.selectedCell = null;
+
+    if (this.gameState.turnPlayer) {
+      this.gameState.turnPlayer = false;
+    } else {
+      this.gameState.turnPlayer = true;
+    }
+  }
+
+  turnComputer() {
+    if (!this.gameState.turnPlayer) {
+      // eslint-disable-next-line max-len
+      const teamComputer = this.gameState.characters.filter((item) => computerTypesName().includes(item.character.type));
+      // eslint-disable-next-line max-len
+      const teamPlayer = this.gameState.characters.filter((item) => playerTypesName().includes(item.character.type));
+
+      for (let i = 0; i < teamComputer.length; i += 1) {
+        this.gameState.selectedPosition = teamComputer[i].position;
+        this.gameState.selectedCharacter = teamComputer[i].character;
+        for (let j = 0; j < teamPlayer.length; j += 1) {
+          if (this.availableCells(teamPlayer[j].position).possible) {
+            this.gamePlay.selectCell(teamComputer[i].position);
+            this.gamePlay.selectCell(teamPlayer[j].position, 'red');
+            this.gameState.selectedCell = teamPlayer[j].position;
+            this.attack(teamPlayer[j].position);
+            return null;
+          }
+        }
+      }
+
+      for (let i = 0; i < teamPlayer.length; i += 1) {
+        this.gameState.selectedPosition = teamPlayer[i].position;
+        this.gameState.selectedCharacter = teamPlayer[i].character;
+        for (let j = 0; j < teamComputer.length; j += 1) {
+          if (this.availableCells(teamComputer[j].position).possible) {
+            this.gameState.selectedPosition = teamComputer[j].position;
+            this.gameState.selectedCharacter = teamComputer[j].character;
+
+            this.gamePlay.selectCell(teamComputer[j].position);
+
+            const arrayCells = this.availableCells(0).array;
+
+            let index = Math.floor(Math.random() * arrayCells.length);
+            while (
+              // eslint-disable-next-line no-loop-func
+              teamComputer.findIndex((item) => item.position === arrayCells[index]) > -1
+              // eslint-disable-next-line no-loop-func
+              || teamPlayer.findIndex((item) => item.position === arrayCells[index]) > -1
+            ) {
+              index = Math.floor(Math.random() * arrayCells.length);
+            }
+
+            this.gamePlay.selectCell(arrayCells[index], 'green');
+            this.gameState.selectedCell = arrayCells[index];
+            this.motion(arrayCells[index]);
+            return null;
+          }
+        }
+      }
+
+      const indexCharacter = Math.floor(Math.random() * (teamComputer.length));
+
+      this.gameState.selectedPosition = teamComputer[indexCharacter].position;
+      this.gameState.selectedCharacter = teamComputer[indexCharacter].character;
+      this.gamePlay.selectCell(teamComputer[indexCharacter].position);
+
+      const arrayCells = this.availableCells(0).array;
+
+      let index = Math.floor(Math.random() * arrayCells.length);
+      while (
+        // eslint-disable-next-line no-loop-func
+        teamComputer.findIndex((item) => item.position === arrayCells[index]) > -1
+        // eslint-disable-next-line no-loop-func
+        || teamPlayer.findIndex((item) => item.position === arrayCells[index]) > -1
+      ) {
+        index = Math.floor(Math.random() * arrayCells.length);
+      }
+
+      this.gamePlay.selectCell(arrayCells[index], 'green');
+      this.gameState.selectedCell = arrayCells[index];
+
+      this.motion(arrayCells[index]);
+    }
+    return null;
+  }
+
+  levelUp() {
+    if (this.gameState.level === 4) {
+      this.checkRecord();
+      this.gameOver(`Win: ${this.gameState.score}. Лучший результат - ${this.gameState.record}`);
+
+      return null;
+    }
+
+    this.gameState.level += 1;
+
+    // eslint-disable-next-line max-len
+    this.gameState.score += this.gameState.characters.reduce((sum, item) => sum + item.character.health, 0);
+
+    this.checkRecord();
+    GamePlay.showMessage(`Level up: ${this.gameState.score}. Best scxore: ${this.gameState.record}`);
+
+    for (let i = 0; i < this.gameState.characters.length; i += 1) {
+      this.gameState.characters[i].character.level += 1;
+
+      this.gameState.characters[i].character.attack = Math.round(Math.max(
+        this.gameState.characters[i].character.attack,
+        // eslint-disable-next-line max-len
+        (this.gameState.characters[i].character.attack * (1.8 - (this.gameState.characters[i].character.health * 0.01))),
+      ));
+
+      this.gameState.characters[i].character.defence = Math.round(Math.max(
+        this.gameState.characters[i].character.defence,
+        // eslint-disable-next-line max-len
+        (this.gameState.characters[i].character.defence * (1.8 - (this.gameState.characters[i].character.health * 0.01))),
+      ));
+
+      this.gameState.characters[i].character.health += 80;
+      if (this.gameState.characters[i].character.health > 100) {
+        this.gameState.characters[i].character.health = 100;
+      }
+    }
+
+    if (this.gameState.level === 2) {
+      const teamPlayer = generateTeam(playerTypes(), 1, 1);
+      teamPlayer.redefiningPosition(this.gameState.characters, playerPositions());
+      teamPlayer.members.forEach((item) => this.gameState.characters.push(item));
+      const teamComputer = generateTeam(computerTypes(), 2, this.gameState.characters.length);
+      teamComputer.redefiningPosition(this.gameState.characters, computerPositions());
+      teamComputer.members.forEach((item) => this.gameState.characters.push(item));
+    }
+
+    if (this.gameState.level === 3) {
+      const teamPlayer = generateTeam(playerTypes(), 2, 2);
+      teamPlayer.redefiningPosition(this.gameState.characters, playerPositions());
+      teamPlayer.members.forEach((item) => this.gameState.characters.push(item));
+      const teamComputer = generateTeam(computerTypes(), 3, this.gameState.characters.length);
+      teamComputer.redefiningPosition(this.gameState.characters, computerPositions());
+      teamComputer.members.forEach((item) => this.gameState.characters.push(item));
+    }
+
+    if (this.gameState.level === 4) {
+      const teamPlayer = generateTeam(playerTypes(), 3, 2);
+      teamPlayer.redefiningPosition(this.gameState.characters, playerPositions());
+      teamPlayer.members.forEach((item) => this.gameState.characters.push(item));
+      const teamComputer = generateTeam(computerTypes(), 4, this.gameState.characters.length);
+      teamComputer.redefiningPosition(this.gameState.characters, computerPositions());
+      teamComputer.members.forEach((item) => this.gameState.characters.push(item));
+    }
+
+    this.gamePlay.drawUi(themes[this.gameState.level]);
+    this.gamePlay.redrawPositions(this.gameState.characters);
+
+    return null;
+  }
+
+  checkRecord() {
+    if (this.gameState.record < this.gameState.score) this.gameState.record = this.gameState.score;
   }
 }

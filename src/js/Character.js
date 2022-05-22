@@ -5,9 +5,19 @@ export default class Character {
     this.defence = 0;
     this.health = 50;
     this.type = type;
-    // TODO: throw error if user use "new Character()"
+
     if (new.target.name === 'Character') {
       throw new Error('Error, class Character cannot create');
     }
+  }
+
+  levelUp() {
+    this.level += 1;
+
+    this.attack = Math.round(Math.max(this.attack, (this.attack * (1.8 - this.health * 0.01))));
+    this.defence = Math.round(Math.max(this.defence, (this.defence * (1.8 - this.health * 0.01))));
+
+    this.health += 80;
+    if (this.health > 100) this.health = 100;
   }
 }
