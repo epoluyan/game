@@ -58,6 +58,7 @@ export default class GameController {
 
   saveGame() {
     this.stateService.save(this.gameState);
+    GamePlay.showMessage('game save');
   }
 
   loadGame() {
@@ -66,6 +67,7 @@ export default class GameController {
     this.gamePlay.drawUi(themes[this.gameState.level]);
     this.gamePlay.redrawPositions(this.gameState.characters);
     if (!this.gameState.turnPlayer) setTimeout(() => this.turnComputer(), 2000);
+    GamePlay.showMessage('game load');
   }
 
   gameOver(message) {
@@ -184,7 +186,9 @@ export default class GameController {
       return ((column - 1) * boardSize + row) - 1;
     }
 
-    if (this.gameState.selectedCharacter.type === 'swordsman' || this.gameState.selectedCharacter.type === 'undead') {
+    const { characterType } = this.gameState.selectedCharacter.type;
+
+    if (characterType === 'swordsman' || characterType === 'undead') {
       if (this.gameState.characters.findIndex((item) => item.position === index) > -1) {
         step = 1;
       } else {
@@ -192,7 +196,7 @@ export default class GameController {
       }
     }
 
-    if (this.gameState.selectedCharacter.type === 'magician' || this.gameState.selectedCharacter.type === 'daemon') {
+    if (characterType === 'magician' || characterType === 'daemon') {
       if (this.gameState.characters.findIndex((item) => item.position === index) > -1) {
         step = 4;
       } else {
@@ -414,23 +418,22 @@ export default class GameController {
     GamePlay.showMessage(`Level up: ${this.gameState.score}. Best scxore: ${this.gameState.record}`);
 
     for (let i = 0; i < this.gameState.characters.length; i += 1) {
-      this.gameState.characters[i].character.level += 1;
+      const currentCharacter = this.gameState.characters[i].character;
+      let { attack, defence, health } = currentCharacter;
 
-      this.gameState.characters[i].character.attack = Math.round(Math.max(
-        this.gameState.characters[i].character.attack,
-        // eslint-disable-next-line max-len
-        (this.gameState.characters[i].character.attack * (1.8 - (this.gameState.characters[i].character.health * 0.01))),
+      attack = Math.round(Math.max(
+        attack,
+        (attack * (1.8 - (health * 0.01))),
       ));
 
-      this.gameState.characters[i].character.defence = Math.round(Math.max(
-        this.gameState.characters[i].character.defence,
-        // eslint-disable-next-line max-len
-        (this.gameState.characters[i].character.defence * (1.8 - (this.gameState.characters[i].character.health * 0.01))),
+      defence = Math.round(Math.max(
+        defence,
+        (defence * (1.8 - (health * 0.01))),
       ));
 
-      this.gameState.characters[i].character.health += 80;
-      if (this.gameState.characters[i].character.health > 100) {
-        this.gameState.characters[i].character.health = 100;
+      health += 80;
+      if (health > 100) {
+        health = 100;
       }
     }
 
